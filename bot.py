@@ -30,9 +30,8 @@ class AntiSpamBot(commands.Bot):
         intents.message_content = True
         
         super().__init__(
-            command_prefix='!',
-            intents=intents,
-            activity=discord.Game(name='スパム対策中')
+            command_prefix=None,  # スラッシュコマンドのみを使用するため不要
+            intents=intents
         )
         
         # 設定の読み込み
