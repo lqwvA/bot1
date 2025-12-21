@@ -1,0 +1,321 @@
+import discord
+import os
+import re
+import json
+from typing import Dict, List, Set, Optional
+from collections import defaultdict, deque
+from discord.ext import commands
+from dotenv import load_dotenv
+from datetime import datetime, timedelta
+
+# 設定ファイルのパス
+CONFIG_FILE = 'bot_config.json'
+
+# 環境変数の読み込み
+load_dotenv()
+TOKEN = os.getenv('DISCORD_TOKEN')
+
+class AntiSpamBot(commands.Bot):
+    def __init__(self, *args, **kwargs):
+        intents = discord.Intents.default()
+        intents.messages = True
+        intents.guilds = True
+        intents.members = True
+        intents.message_content = True
+        
+        super().__init__(
+            command_prefix='!',
+            intents=intents,
+            help_command=None,  # デフォルトのヘルプコマンドを無効化
+            **kwargs
+        )
+        
+        # 設定の読み込み
+        self.config = self.load_config()
+        
+        # スパム検出の設定
+        self.user_message_history = defaultdict(list)  # ユーザーごとのメッセージ履歴
+        self.user_message_content = defaultdict(deque)  # ユーザーごとの直近のメッセージ内容
+        self.user_mentions = defaultdict(list)         # ユーザーごとのメンション履歴
+        
+        # 設定可能なパラメータ
+        self.spam_threshold = self.config.get('spam_threshold', 5)          # 短時間のメッセージ数制限
+        self.spam_time_window = self.config.get('spam_time_window', 10)     # スパム判定の時間枠（秒）
+        self.dupe_threshold = self.config.get('dupe_threshold', 3)          # 同一メッセージの許容回数
+        self.mention_limit = self.config.get('mention_limit', 5)            # 1メッセージあたりのメンション制限
+        self.caps_ratio = self.config.get('caps_ratio', 0.7)                # 大文字の割合がこれを超えると警告
+        self.max_duplicate_chars = self.config.get('max_duplicate_chars', 5) # 連続する同じ文字の最大数
+        
+        # ブロックするURLパターン
+        self.blocked_domains = set(self.config.get('blocked_domains', [
+            'discord.gg/',
+            'discord.com/invite/',
+            'example.com',
+        ]))
+        
+        # ホワイトリスト（管理者ロールや特定のユーザー）
+        self.whitelist_roles = set(self.config.get('whitelist_roles', ['Admin', 'Moderator']))
+        self.whitelist_users = set(self.config.get('whitelist_users', []))
+        
+        # コマンドの追加
+        self.setup_commands()
+
+    def load_config(self) -> dict:
+        """設定をファイルから読み込む"""
+        if os.path.exists(CONFIG_FILE):
+            try:
+                with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except (json.JSONDecodeError, IOError):
+                pass
+        return {}
+    
+    def save_config(self):
+        """設定をファイルに保存"""
+        config = {
+            'spam_threshold': self.spam_threshold,
+            'spam_time_window': self.spam_time_window,
+            'dupe_threshold': self.dupe_threshold,
+            'mention_limit': self.mention_limit,
+            'caps_ratio': self.caps_ratio,
+            'max_duplicate_chars': self.max_duplicate_chars,
+            'blocked_domains': list(self.blocked_domains),
+            'whitelist_roles': list(self.whitelist_roles),
+            'whitelist_users': list(self.whitelist_users),
+        }
+        with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+            json.dump(config, f, indent=4, ensure_ascii=False)
+    
+    def setup_commands(self):
+        """コマンドをセットアップ"""
+        @self.command(name='whitelist')
+        @commands.has_permissions(administrator=True)
+        async def whitelist_cmd(ctx, action: str, user: discord.Member = None):
+            """ホワイトリストを管理するコマンド
+            
+            使い方:
+              !whitelist add @ユーザー - ユーザーをホワイトリストに追加
+              !whitelist remove @ユーザー - ユーザーをホワイトリストから削除
+              !whitelist list - ホワイトリストのユーザーを表示
+            """
+            action = action.lower()
+            user_id = str(user.id) if user else None
+            
+            if action == 'add' and user:
+                self.whitelist_users.add(user_id)
+                self.save_config()
+                await ctx.send(f'✅ {user.mention} をホワイトリストに追加しました')
+                
+            elif action == 'remove' and user:
+                if user_id in self.whitelist_users:
+                    self.whitelist_users.remove(user_id)
+                    self.save_config()
+                    await ctx.send(f'✅ {user.mention} をホワイトリストから削除しました')
+                else:
+                    await ctx.send(f'❌ {user.mention} はホワイトリストに登録されていません')
+                    
+            elif action == 'list':
+                if not self.whitelist_users:
+                    await ctx.send('ホワイトリストは空です')
+                    return
+                    
+                user_list = []
+                for user_id in self.whitelist_users:
+                    user = self.get_user(int(user_id))
+                    user_list.append(f'- {user.mention if user else f"Unknown User ({user_id})"}')
+                
+                embed = discord.Embed(
+                    title='ホワイトリスト登録ユーザー',
+                    description='\n'.join(user_list) or 'なし',
+                    color=discord.Color.blue()
+                )
+                await ctx.send(embed=embed)
+                
+            else:
+                await ctx.send(''':x: 使い方:
+`!whitelist add @ユーザー` - ユーザーをホワイトリストに追加
+`!whitelist remove @ユーザー` - ユーザーをホワイトリストから削除
+`!whitelist list` - ホワイトリストのユーザーを表示''')
+        
+        @whitelist_cmd.error
+        async def whitelist_error(ctx, error):
+            if isinstance(error, commands.MissingPermissions):
+                await ctx.send('❌ このコマンドを実行する権限がありません')
+            elif isinstance(error, commands.MissingRequiredArgument):
+                await ctx.send(f'❌ 引数が不足しています。`!help whitelist` で使い方を確認してください')
+            else:
+                await ctx.send(f'❌ エラーが発生しました: {str(error)}')
+    
+    def is_whitelisted(self, member: discord.Member) -> bool:
+        """ユーザーがホワイトリストに含まれているか確認"""
+        # サーバーオーナーは常に許可
+        if member.guild.owner_id == member.id:
+            return True
+            
+        # ホワイトリストのロールを持っているか確認
+        if any(role.name in self.whitelist_roles for role in member.roles):
+            return True
+            
+        # ユーザーIDがホワイトリストに含まれているか確認
+        if str(member.id) in self.whitelist_users:
+            return True
+            
+        return False
+
+    async def on_ready(self):
+        print(f'{self.user} がログインしました。')
+
+    def check_message_content(self, message: discord.Message) -> List[str]:
+        """メッセージの内容をチェックして、問題があれば理由を返す"""
+        content = message.content
+        author = message.author
+        issues = []
+        
+        # 大文字の乱用チェック
+        if len(content) > 10:  # 短いメッセージは無視
+            upper_ratio = sum(1 for c in content if c.isupper()) / len(content)
+            if upper_ratio > self.caps_ratio:
+                issues.append(f'大文字の乱用 (大文字率: {upper_ratio*100:.1f}%)')
+        
+        # 連続する同じ文字のチェック
+        if re.search(r'(.)\1{' + str(self.max_duplicate_chars) + ',}', content):
+            issues.append('連続する同じ文字の乱用')
+        
+        # ブロックされたURLのチェック
+        for domain in self.blocked_domains:
+            if domain.lower() in content.lower():
+                issues.append(f'ブロックされたドメイン: {domain}')
+                break
+        
+        # 招待リンクのチェック
+        if 'discord.gg/' in content.lower() or 'discord.com/invite/' in content.lower():
+            if not self.is_whitelisted(author):
+                issues.append('許可されていない招待リンク')
+        
+        # メンションのチェック
+        if len(message.mentions) > self.mention_limit:
+            issues.append(f'メンションの乱用 ({len(message.mentions)}回)')
+        
+        return issues
+    
+    async def check_duplicate_messages(self, message: discord.Message) -> bool:
+        """同じメッセージの繰り返しをチェック"""
+        user_id = message.author.id
+        content = message.content.strip()
+        
+        # メッセージが空や短すぎる場合は無視
+        if len(content) < 5:
+            return False
+            
+        # ユーザーの直近のメッセージを取得
+        recent_messages = self.user_message_content[user_id]
+        
+        # 同じ内容のメッセージが連続して送信されていないか確認
+        duplicate_count = 0
+        for msg, timestamp in recent_messages:
+            if msg == content:
+                duplicate_count += 1
+                if duplicate_count >= self.dupe_threshold - 1:  # 現在のメッセージを含めて閾値を超えるか
+                    return True
+            else:
+                # 異なるメッセージが来たらカウントをリセット
+                duplicate_count = 0
+                
+        return False
+    
+    async def punish_user(self, message: discord.Message, reason: str):
+        """スパマーを処罰"""
+        try:
+            # ユーザーをBAN
+            await message.author.ban(
+                reason=f'スパム行為のためBAN: {reason}',
+                delete_message_days=1
+            )
+            
+            # ログを送信
+            log_msg = (
+                f'🚨 **ユーザーがBANされました**\n'
+                f'**ユーザー**: {message.author.mention} (`{message.author.id}`)\n'
+                f'**理由**: {reason}\n'
+                f'**チャンネル**: {message.channel.mention}'
+            )
+            
+            # ログチャンネルを探す
+            log_channel = discord.utils.get(message.guild.text_channels, name='mod-log')
+            if not log_channel:
+                log_channel = message.channel
+                
+            await log_channel.send(log_msg)
+            
+            # スパムメッセージを削除
+            try:
+                await message.delete()
+            except:
+                pass
+                
+        except discord.Forbidden:
+            print(f'権限エラー: {message.author} をBANできませんでした')
+        except Exception as e:
+            print(f'エラーが発生しました: {e}')
+    
+    async def on_message(self, message):
+        # DMは無視
+        if not message.guild:
+            return
+            
+        # ボット自身のメッセージは無視
+        if message.author.bot:
+            return
+            
+        # ホワイトリストユーザーはスキップ
+        if self.is_whitelisted(message.author):
+            return
+
+        current_time = datetime.utcnow()
+        user_id = message.author.id
+        
+        # メッセージ履歴を更新
+        self.user_message_history[user_id].append(current_time)
+        
+        # メッセージ内容を記録（重複チェック用）
+        self.user_message_content[user_id].append((message.content.strip(), current_time))
+        
+        # 古いデータを削除
+        self.user_message_history[user_id] = [
+            t for t in self.user_message_history[user_id] 
+            if current_time - t < timedelta(seconds=self.spam_time_window)
+        ]
+        
+        # メッセージ履歴もクリーンアップ
+        self.user_message_content[user_id] = [
+            (msg, t) for msg, t in self.user_message_content[user_id]
+            if current_time - t < timedelta(seconds=self.spam_time_window * 2)
+        ]
+        
+        # 各種チェックを実行
+        issues = []
+        
+        # 1. メッセージフラッドチェック
+        if len(self.user_message_history[user_id]) > self.spam_threshold:
+            issues.append(f'メッセージフラッド ({len(self.user_message_history[user_id])}回/10秒)')
+        
+        # 2. メッセージ内容のチェック
+        content_issues = await self.check_message_content(message)
+        issues.extend(content_issues)
+        
+        # 3. 重複メッセージのチェック
+        if await self.check_duplicate_messages(message):
+            issues.append(f'同じメッセージの繰り返し (連続{self.dupe_threshold}回以上)')
+        
+        # 問題があれば処罰
+        if issues:
+            reason = ', '.join(issues)
+            await self.punish_user(message, reason)
+
+# ボットを起動
+if __name__ == "__main__":
+    if TOKEN:
+        bot = AntiSpamBot()
+        bot.run(TOKEN)
+    else:
+        print("エラー: DISCORD_TOKENが設定されていません。")
