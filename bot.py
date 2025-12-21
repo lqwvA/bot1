@@ -2,12 +2,17 @@ import discord
 import os
 import re
 import json
+import logging
 from typing import Dict, List, Set, Optional
 from collections import defaultdict, deque
 from discord.ext import commands
 from discord import app_commands
 from dotenv import load_dotenv
 from datetime import datetime, timedelta
+
+# ロギングの設定
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger('discord')
 
 # 設定ファイルのパス
 CONFIG_FILE = 'bot_config.json'
@@ -17,7 +22,7 @@ load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
 
 class AntiSpamBot(commands.Bot):
-    def __init__(self, *args, **kwargs):
+    def __init__(self):
         intents = discord.Intents.default()
         intents.messages = True
         intents.guilds = True
@@ -27,24 +32,24 @@ class AntiSpamBot(commands.Bot):
         super().__init__(
             command_prefix='!',
             intents=intents,
-            **kwargs
+            activity=discord.Game(name='スパム対策中')
         )
         
         # 設定の読み込み
         self.config = self.load_config()
         
         # スパム検出の設定
-        self.user_message_history = defaultdict(list)  # ユーザーごとのメッセージ履歴
-        self.user_message_content = defaultdict(deque)  # ユーザーごとの直近のメッセージ内容
-        self.user_mentions = defaultdict(list)         # ユーザーごとのメンション履歴
+        self.user_message_history = defaultdict(list)
+        self.user_message_content = defaultdict(deque)
+        self.user_mentions = defaultdict(list)
         
         # 設定可能なパラメータ
-        self.spam_threshold = self.config.get('spam_threshold', 5)          # 短時間のメッセージ数制限
-        self.spam_time_window = self.config.get('spam_time_window', 10)     # スパム判定の時間枠（秒）
-        self.dupe_threshold = self.config.get('dupe_threshold', 3)          # 同一メッセージの許容回数
-        self.mention_limit = self.config.get('mention_limit', 5)            # 1メッセージあたりのメンション制限
-        self.caps_ratio = self.config.get('caps_ratio', 0.7)                # 大文字の割合がこれを超えると警告
-        self.max_duplicate_chars = self.config.get('max_duplicate_chars', 5) # 連続する同じ文字の最大数
+        self.spam_threshold = self.config.get('spam_threshold', 5)
+        self.spam_time_window = self.config.get('spam_time_window', 10)
+        self.dupe_threshold = self.config.get('dupe_threshold', 3)
+        self.mention_limit = self.config.get('mention_limit', 5)
+        self.caps_ratio = self.config.get('caps_ratio', 0.7)
+        self.max_duplicate_chars = self.config.get('max_duplicate_chars', 5)
         
         # ブロックするURLパターン
         self.blocked_domains = set(self.config.get('blocked_domains', [
@@ -53,14 +58,20 @@ class AntiSpamBot(commands.Bot):
             'example.com',
         ]))
         
-        # ホワイトリスト（管理者ロールや特定のユーザー）
+        # ホワイトリスト
         self.whitelist_roles = set(self.config.get('whitelist_roles', ['Admin', 'Moderator']))
         self.whitelist_users = set(self.config.get('whitelist_users', []))
         
-        # スラッシュコマンドの同期
-        self.tree.add_command(self.whitelist_command)
-        
-    # スラッシュコマンドの定義
+    async def setup_hook(self):
+        # スラッシュコマンドを登録
+        try:
+            # グローバルコマンドとして登録
+            self.tree.add_command(self.whitelist_command)
+            synced = await self.tree.sync()
+            logger.info(f'同期したスラッシュコマンド: {len(synced)}個')
+        except Exception as e:
+            logger.error(f'スラッシュコマンドの同期に失敗: {e}')
+
     @app_commands.command(name="whitelist", description="ホワイトリストを管理します")
     @app_commands.describe(
         action="実行するアクション (add/remove/list)",
@@ -69,55 +80,80 @@ class AntiSpamBot(commands.Bot):
     @app_commands.checks.has_permissions(administrator=True)
     async def whitelist_command(self, interaction: discord.Interaction, action: str, user: Optional[discord.Member] = None):
         """ホワイトリストを管理するコマンド"""
-        action = action.lower()
-        user_id = str(user.id) if user else None
-        
-        if action == 'add' and user:
-            self.whitelist_users.add(user_id)
-            self.save_config()
-            await interaction.response.send_message(f'✅ {user.mention} をホワイトリストに追加しました', ephemeral=True)
+        try:
+            action = action.lower()
             
-        elif action == 'remove' and user:
-            if user_id in self.whitelist_users:
-                self.whitelist_users.remove(user_id)
+            if action == 'add' and user:
+                self.whitelist_users.add(str(user.id))
                 self.save_config()
-                await interaction.response.send_message(f'✅ {user.mention} をホワイトリストから削除しました', ephemeral=True)
+                await interaction.response.send_message(
+                    f'✅ {user.mention} をホワイトリストに追加しました',
+                    ephemeral=True
+                )
+                
+            elif action == 'remove' and user:
+                user_id = str(user.id)
+                if user_id in self.whitelist_users:
+                    self.whitelist_users.remove(user_id)
+                    self.save_config()
+                    await interaction.response.send_message(
+                        f'✅ {user.mention} をホワイトリストから削除しました',
+                        ephemeral=True
+                    )
+                else:
+                    await interaction.response.send_message(
+                        f'❌ {user.mention} はホワイトリストに登録されていません',
+                        ephemeral=True
+                    )
+                    
+            elif action == 'list':
+                if not self.whitelist_users:
+                    await interaction.response.send_message('ホワイトリストは空です', ephemeral=True)
+                    return
+                    
+                user_list = []
+                for uid in self.whitelist_users:
+                    member = interaction.guild.get_member(int(uid))
+                    user_list.append(f'- {member.mention if member else f"Unknown User ({uid})"}')
+                
+                embed = discord.Embed(
+                    title='ホワイトリスト登録ユーザー',
+                    description='\n'.join(user_list) or 'なし',
+                    color=discord.Color.blue()
+                )
+                await interaction.response.send_message(embed=embed, ephemeral=True)
+                
             else:
-                await interaction.response.send_message(f'❌ {user.mention} はホワイトリストに登録されていません', ephemeral=True)
+                await interaction.response.send_message(
+                    '使い方:\n'
+                    '`/whitelist add @ユーザー` - ユーザーをホワイトリストに追加\n'
+                    '`/whitelist remove @ユーザー` - ユーザーをホワイトリストから削除\n'
+                    '`/whitelist list` - ホワイトリストのユーザーを表示',
+                    ephemeral=True
+                )
                 
-        elif action == 'list':
-            if not self.whitelist_users:
-                await interaction.response.send_message('ホワイトリストは空です', ephemeral=True)
-                return
-                
-            user_list = []
-            for uid in self.whitelist_users:
-                member = interaction.guild.get_member(int(uid))
-                user_list.append(f'- {member.mention if member else f"Unknown User ({uid})"}')
-            
-            embed = discord.Embed(
-                title='ホワイトリスト登録ユーザー',
-                description='\n'.join(user_list) or 'なし',
-                color=discord.Color.blue()
-            )
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-            
-        else:
-            await interaction.response.send_message(
-                '使い方:\n'
-                '`/whitelist add @ユーザー` - ユーザーをホワイトリストに追加\n'
-                '`/whitelist remove @ユーザー` - ユーザーをホワイトリストから削除\n'
-                '`/whitelist list` - ホワイトリストのユーザーを表示',
-                ephemeral=True
-            )
-            
+        except Exception as e:
+            logger.error(f'ホワイトリストコマンドでエラー: {e}')
+            if not interaction.response.is_done():
+                await interaction.response.send_message(
+                    '❌ コマンドの実行中にエラーが発生しました',
+                    ephemeral=True
+                )
+
     @whitelist_command.error
     async def whitelist_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
         if isinstance(error, app_commands.MissingPermissions):
-            await interaction.response.send_message('❌ このコマンドを実行する権限がありません', ephemeral=True)
+            await interaction.response.send_message(
+                '❌ このコマンドを実行する権限がありません',
+                ephemeral=True
+            )
         else:
-            await interaction.response.send_message(f'❌ エラーが発生しました: {str(error)}', ephemeral=True)
-            print(f'Error in whitelist command: {error}')
+            logger.error(f'ホワイトリストコマンドエラー: {error}')
+            if not interaction.response.is_done():
+                await interaction.response.send_message(
+                    f'❌ エラーが発生しました: {str(error)}',
+                    ephemeral=True
+                )
         
         # コマンドの追加
         self.setup_commands()
@@ -170,7 +206,7 @@ class AntiSpamBot(commands.Bot):
         return False
 
     async def on_ready(self):
-        print(f'{self.user} がログインしました。')
+        logger.info(f'{self.user} がログインしました。')
         await self.setup_hook()
 
     def check_message_content(self, message: discord.Message) -> List[str]:
