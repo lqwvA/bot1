@@ -5,6 +5,7 @@ import json
 from typing import Dict, List, Set, Optional
 from collections import defaultdict, deque
 from discord.ext import commands
+from discord import app_commands
 from dotenv import load_dotenv
 from datetime import datetime, timedelta
 
@@ -26,7 +27,6 @@ class AntiSpamBot(commands.Bot):
         super().__init__(
             command_prefix='!',
             intents=intents,
-            help_command=None,  # デフォルトのヘルプコマンドを無効化
             **kwargs
         )
         
@@ -57,6 +57,68 @@ class AntiSpamBot(commands.Bot):
         self.whitelist_roles = set(self.config.get('whitelist_roles', ['Admin', 'Moderator']))
         self.whitelist_users = set(self.config.get('whitelist_users', []))
         
+        # スラッシュコマンドの同期
+        self.tree.add_command(self.whitelist_command)
+        
+    # スラッシュコマンドの定義
+    @app_commands.command(name="whitelist", description="ホワイトリストを管理します")
+    @app_commands.describe(
+        action="実行するアクション (add/remove/list)",
+        user="追加・削除するユーザー (listの場合は不要)"
+    )
+    @app_commands.checks.has_permissions(administrator=True)
+    async def whitelist_command(self, interaction: discord.Interaction, action: str, user: Optional[discord.Member] = None):
+        """ホワイトリストを管理するコマンド"""
+        action = action.lower()
+        user_id = str(user.id) if user else None
+        
+        if action == 'add' and user:
+            self.whitelist_users.add(user_id)
+            self.save_config()
+            await interaction.response.send_message(f'✅ {user.mention} をホワイトリストに追加しました', ephemeral=True)
+            
+        elif action == 'remove' and user:
+            if user_id in self.whitelist_users:
+                self.whitelist_users.remove(user_id)
+                self.save_config()
+                await interaction.response.send_message(f'✅ {user.mention} をホワイトリストから削除しました', ephemeral=True)
+            else:
+                await interaction.response.send_message(f'❌ {user.mention} はホワイトリストに登録されていません', ephemeral=True)
+                
+        elif action == 'list':
+            if not self.whitelist_users:
+                await interaction.response.send_message('ホワイトリストは空です', ephemeral=True)
+                return
+                
+            user_list = []
+            for uid in self.whitelist_users:
+                member = interaction.guild.get_member(int(uid))
+                user_list.append(f'- {member.mention if member else f"Unknown User ({uid})"}')
+            
+            embed = discord.Embed(
+                title='ホワイトリスト登録ユーザー',
+                description='\n'.join(user_list) or 'なし',
+                color=discord.Color.blue()
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            
+        else:
+            await interaction.response.send_message(
+                '使い方:\n'
+                '`/whitelist add @ユーザー` - ユーザーをホワイトリストに追加\n'
+                '`/whitelist remove @ユーザー` - ユーザーをホワイトリストから削除\n'
+                '`/whitelist list` - ホワイトリストのユーザーを表示',
+                ephemeral=True
+            )
+            
+    @whitelist_command.error
+    async def whitelist_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
+        if isinstance(error, app_commands.MissingPermissions):
+            await interaction.response.send_message('❌ このコマンドを実行する権限がありません', ephemeral=True)
+        else:
+            await interaction.response.send_message(f'❌ エラーが発生しました: {str(error)}', ephemeral=True)
+            print(f'Error in whitelist command: {error}')
+        
         # コマンドの追加
         self.setup_commands()
 
@@ -86,65 +148,10 @@ class AntiSpamBot(commands.Bot):
         with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
             json.dump(config, f, indent=4, ensure_ascii=False)
     
-    def setup_commands(self):
-        """コマンドをセットアップ"""
-        @self.command(name='whitelist')
-        @commands.has_permissions(administrator=True)
-        async def whitelist_cmd(ctx, action: str, user: discord.Member = None):
-            """ホワイトリストを管理するコマンド
-            
-            使い方:
-              !whitelist add @ユーザー - ユーザーをホワイトリストに追加
-              !whitelist remove @ユーザー - ユーザーをホワイトリストから削除
-              !whitelist list - ホワイトリストのユーザーを表示
-            """
-            action = action.lower()
-            user_id = str(user.id) if user else None
-            
-            if action == 'add' and user:
-                self.whitelist_users.add(user_id)
-                self.save_config()
-                await ctx.send(f'✅ {user.mention} をホワイトリストに追加しました')
-                
-            elif action == 'remove' and user:
-                if user_id in self.whitelist_users:
-                    self.whitelist_users.remove(user_id)
-                    self.save_config()
-                    await ctx.send(f'✅ {user.mention} をホワイトリストから削除しました')
-                else:
-                    await ctx.send(f'❌ {user.mention} はホワイトリストに登録されていません')
-                    
-            elif action == 'list':
-                if not self.whitelist_users:
-                    await ctx.send('ホワイトリストは空です')
-                    return
-                    
-                user_list = []
-                for user_id in self.whitelist_users:
-                    user = self.get_user(int(user_id))
-                    user_list.append(f'- {user.mention if user else f"Unknown User ({user_id})"}')
-                
-                embed = discord.Embed(
-                    title='ホワイトリスト登録ユーザー',
-                    description='\n'.join(user_list) or 'なし',
-                    color=discord.Color.blue()
-                )
-                await ctx.send(embed=embed)
-                
-            else:
-                await ctx.send(''':x: 使い方:
-`!whitelist add @ユーザー` - ユーザーをホワイトリストに追加
-`!whitelist remove @ユーザー` - ユーザーをホワイトリストから削除
-`!whitelist list` - ホワイトリストのユーザーを表示''')
-        
-        @whitelist_cmd.error
-        async def whitelist_error(ctx, error):
-            if isinstance(error, commands.MissingPermissions):
-                await ctx.send('❌ このコマンドを実行する権限がありません')
-            elif isinstance(error, commands.MissingRequiredArgument):
-                await ctx.send(f'❌ 引数が不足しています。`!help whitelist` で使い方を確認してください')
-            else:
-                await ctx.send(f'❌ エラーが発生しました: {str(error)}')
+    async def setup_hook(self):
+        """ボット起動時にスラッシュコマンドを同期"""
+        await self.tree.sync()
+        print(f'スラッシュコマンドを同期しました')
     
     def is_whitelisted(self, member: discord.Member) -> bool:
         """ユーザーがホワイトリストに含まれているか確認"""
@@ -164,6 +171,7 @@ class AntiSpamBot(commands.Bot):
 
     async def on_ready(self):
         print(f'{self.user} がログインしました。')
+        await self.setup_hook()
 
     def check_message_content(self, message: discord.Message) -> List[str]:
         """メッセージの内容をチェックして、問題があれば理由を返す"""
