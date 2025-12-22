@@ -59,25 +59,58 @@ class AntiSpamBot(discord.Client):
         self.whitelist_roles = set(self.config.get('whitelist_roles', ['Admin', 'Moderator']))
         self.whitelist_users = set(self.config.get('whitelist_users', []))
         
+        # コマンドを登録
+        self.tree.command(
+            name="whitelist",
+            description="ホワイトリストを管理します",
+            guild=None  # グローバルコマンドとして登録
+        )(
+            app_commands.describe(
+                action="実行するアクション (add/remove/list)",
+                user="追加・削除するユーザー (listの場合は不要)"
+            )(
+                app_commands.checks.has_permissions(administrator=True)(
+                    self._whitelist_command
+                )
+            )
+        )
+        
     async def setup_hook(self):
         # スラッシュコマンドを登録
         try:
-            # グローバルコマンドとして登録
+            # コマンドを追加
             self.tree.add_command(self.whitelist_command)
+            
+            # コマンドを同期（グローバルコマンドとして登録）
+            logger.info('スラッシュコマンドを同期中...')
+            
+            # 既存のコマンドをクリア（必要に応じて）
+            # self.tree.clear_commands(guild=None)
+            
+            # コマンドを同期
             synced = await self.tree.sync()
-            logger.info(f'同期したスラッシュコマンド: {len(synced)}個')
+            
+            # 同期されたコマンドをログに出力
+            logger.info(f'同期したスラッシュコマンド ({len(synced)}個):')
+            for cmd in synced:
+                logger.info(f'- /{cmd.name}: {cmd.description}')
+                
+            # サーバーごとのコマンドも確認
+            for guild in self.guilds:
+                guild_synced = await self.tree.sync(guild=guild)
+                if guild_synced:
+                    logger.info(f'サーバー "{guild.name}" で同期したコマンド ({len(guild_synced)}個)')
+                    
         except Exception as e:
-            logger.error(f'スラッシュコマンドの同期に失敗: {e}')
+            logger.error(f'スラッシュコマンドの同期に失敗: {type(e).__name__}: {e}', exc_info=True)
             raise
 
-    @app_commands.command(name="whitelist", description="ホワイトリストを管理します")
-    @app_commands.describe(
-        action="実行するアクション (add/remove/list)",
-        user="追加・削除するユーザー (listの場合は不要)"
-    )
-    @app_commands.checks.has_permissions(administrator=True)
-    async def whitelist_command(self, interaction: discord.Interaction, action: str, user: Optional[discord.Member] = None):
+    # コマンドをクラスメソッドとして定義
+    @staticmethod
+    async def _whitelist_command(interaction: discord.Interaction, action: str, user: Optional[discord.Member] = None):
         """ホワイトリストを管理するコマンド"""
+        # インスタンスを取得
+        bot = interaction.client
         try:
             action = action.lower()
             
