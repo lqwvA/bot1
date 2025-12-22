@@ -24,6 +24,8 @@ bot = commands.Bot(command_prefix='!', intents=intents)
 @bot.event
 async def on_ready():
     print(f'{bot.user.name} がログインしました！')
+    # 処理中フラグを初期化
+    bot.processing = False
 
 @bot.event
 async def on_message(message):
@@ -31,10 +33,29 @@ async def on_message(message):
     if message.author == bot.user:
         return
 
-    # 「🔓」というメッセージに反応
-    if '🔓' in message.content:
-        # ロールを取得（存在しなければ作成）
+    # メッセージが空、または🔓を含まない場合は無視
+    if not message.content or '🔓' not in message.content:
+        await bot.process_commands(message)
+        return
+
+    # 処理中フラグを確認（重複処理防止）
+    if bot.processing:
+        return
+
+    try:
+        # 処理中フラグを設定
+        bot.processing = True
+
+        # 既にロールを持っているか確認
         role = get(message.guild.roles, name=ROLE_NAME)
+        if role and role in message.author.roles:
+            await message.channel.send(
+                f"⚠️ {message.author.mention} は既に「{ROLE_NAME}」ロールを持っています。",
+                delete_after=10
+            )
+            return
+
+        # ロールを取得（存在しなければ作成）
         if not role:
             try:
                 role = await message.guild.create_role(
@@ -44,7 +65,7 @@ async def on_message(message):
                 )
                 await message.channel.send(
                     f"✅ ロール「{ROLE_NAME}」を作成しました。",
-                    delete_after=10  # 10秒後にメッセージを削除
+                    delete_after=10
                 )
             except discord.Forbidden:
                 await message.channel.send(
@@ -66,6 +87,16 @@ async def on_message(message):
                 delete_after=10
             )
     
+    finally:
+        # 処理中フラグを解除
+        bot.processing = False
+
+    # 元のメッセージを削除
+    try:
+        await message.delete()
+    except:
+        pass
+
     # コマンドの処理を続行
     await bot.process_commands(message)
 
