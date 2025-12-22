@@ -260,6 +260,63 @@ class AntiSpamBot(discord.Client):
         except Exception as e:
             logger.error(f'起動中にエラーが発生しました: {e}', exc_info=True)
             await self.close()
+            
+    async def on_message(self, message):
+        # ボット自身のメッセージは無視
+        if message.author == self.user:
+            return
+            
+        # DMは無視
+        if not message.guild:
+            return
+            
+        # ホワイトリストユーザーはスキップ
+        if self.is_whitelisted(message.author):
+            return
+            
+        current_time = datetime.utcnow()
+        user_id = message.author.id
+        
+        # メッセージ履歴を更新
+        self.user_message_history[user_id].append(current_time)
+        
+        # メッセージ内容を記録（重複チェック用）
+        self.user_message_content[user_id].append((message.content.strip(), current_time))
+        
+        # 古いデータを削除（10秒以上前のメッセージ）
+        self.user_message_history[user_id] = [
+            t for t in self.user_message_history[user_id] 
+            if (current_time - t).total_seconds() < self.spam_time_window
+        ]
+        
+        # メッセージ履歴もクリーンアップ
+        self.user_message_content[user_id] = [
+            (msg, t) for msg, t in self.user_message_content[user_id]
+            if (current_time - t).total_seconds() < self.spam_time_window * 2
+        ]
+        
+        # 各種チェックを実行
+        issues = []
+        
+        # 1. メッセージフラッドチェック
+        if len(self.user_message_history[user_id]) > self.spam_threshold:
+            issues.append(f'メッセージフラッド ({len(self.user_message_history[user_id])}回/{self.spam_time_window}秒)')
+        
+        # 2. メッセージ内容のチェック
+        content_issues = self.check_message_content(message)
+        issues.extend(content_issues)
+        
+        # 3. 重複メッセージのチェック
+        if await self.check_duplicate_messages(message):
+            issues.append(f'同じメッセージの繰り返し (連続{self.dupe_threshold}回以上)')
+        
+        # 問題があれば処罰
+        if issues:
+            reason = ', '.join(issues)
+            await self.punish_user(message, reason)
+        
+        # コマンド処理のために親クラスのon_messageも呼び出す
+        await self.process_commands(message)
 
     def check_message_content(self, message: discord.Message) -> List[str]:
         """メッセージの内容をチェックして、問題があれば理由を返す"""
