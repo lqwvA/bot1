@@ -16,7 +16,7 @@ intents = discord.Intents.default()
 intents.messages = True
 intents.guilds = True
 intents.members = True
-intents.message_content = True  # メッセージの内容を取得するために必要
+intents.message_content = True
 
 # ボットを初期化
 bot = commands.Bot(command_prefix='!', intents=intents)
@@ -42,17 +42,29 @@ async def on_message(message):
                     mentionable=True,
                     reason='浮上用ロールの作成'
                 )
-                await message.channel.send(f"✅ ロール「{ROLE_NAME}」を作成しました。")
+                await message.channel.send(
+                    f"✅ ロール「{ROLE_NAME}」を作成しました。",
+                    delete_after=10  # 10秒後にメッセージを削除
+                )
             except discord.Forbidden:
-                await message.channel.send("❌ ロールを作成する権限がありません。")
+                await message.channel.send(
+                    "❌ ロールを作成する権限がありません。",
+                    delete_after=10
+                )
                 return
 
         # メンバーにロールを付与
         try:
             await message.author.add_roles(role)
-            await message.channel.send(f"✅ {message.author.mention} に「{ROLE_NAME}」ロールを付与しました。")
+            await message.channel.send(
+                f"✅ {message.author.mention} に「{ROLE_NAME}」ロールを付与しました。",
+                delete_after=10
+            )
         except discord.Forbidden:
-            await message.channel.send("❌ ロールを付与する権限がありません。")
+            await message.channel.send(
+                "❌ ロールを付与する権限がありません。",
+                delete_after=10
+            )
     
     # コマンドの処理を続行
     await bot.process_commands(message)
