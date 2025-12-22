@@ -171,20 +171,24 @@ class AntiSpamBot(discord.Client):
                     ephemeral=True
                 )
 
-    @whitelist_command.error
-    async def whitelist_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
+    async def on_command_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
+        """スラッシュコマンドのエラーハンドラー"""
         if isinstance(error, app_commands.MissingPermissions):
-            await interaction.response.send_message(
-                '❌ このコマンドを実行する権限がありません',
-                ephemeral=True
-            )
-        else:
-            logger.error(f'ホワイトリストコマンドエラー: {error}')
             if not interaction.response.is_done():
                 await interaction.response.send_message(
-                    f'❌ エラーが発生しました: {str(error)}',
+                    '❌ このコマンドを実行する権限がありません',
                     ephemeral=True
                 )
+        else:
+            logger.error(f'コマンドエラー: {error}', exc_info=True)
+            if not interaction.response.is_done():
+                try:
+                    await interaction.response.send_message(
+                        '❌ コマンドの実行中にエラーが発生しました',
+                        ephemeral=True
+                    )
+                except Exception as e:
+                    logger.error(f'エラーメッセージの送信に失敗: {e}')
         
         # コマンドの追加
         self.setup_commands()
@@ -238,10 +242,15 @@ class AntiSpamBot(discord.Client):
 
     async def on_ready(self):
         logger.info(f'{self.user} がログインしました。')
+        logger.info(f'Bot ID: {self.user.id}')
+        logger.info(f'サーバー数: {len(self.guilds)}')
+        
         try:
+            # コマンドを同期
             await self.setup_hook()
+            logger.info('起動が完了しました。スラッシュコマンドが利用可能です。')
         except Exception as e:
-            logger.error(f'起動中にエラーが発生しました: {e}')
+            logger.error(f'起動中にエラーが発生しました: {e}', exc_info=True)
             await self.close()
 
     def check_message_content(self, message: discord.Message) -> List[str]:
