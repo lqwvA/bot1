@@ -59,21 +59,19 @@ class AntiSpamBot(discord.Client):
         self.whitelist_roles = set(self.config.get('whitelist_roles', ['Admin', 'Moderator']))
         self.whitelist_users = set(self.config.get('whitelist_users', []))
         
-        # コマンドを登録
-        self.tree.command(
+        # コマンドをデコレータで登録
+        @self.tree.command(
             name="whitelist",
-            description="ホワイトリストを管理します",
-            guild=None  # グローバルコマンドとして登録
-        )(
-            app_commands.describe(
-                action="実行するアクション (add/remove/list)",
-                user="追加・削除するユーザー (listの場合は不要)"
-            )(
-                app_commands.checks.has_permissions(administrator=True)(
-                    self._whitelist_command
-                )
-            )
+            description="ホワイトリストを管理します"
         )
+        @app_commands.describe(
+            action="実行するアクション (add/remove/list)",
+            user="追加・削除するユーザー (listの場合は不要)"
+        )
+        @app_commands.checks.has_permissions(administrator=True)
+        async def _whitelist_command_wrapper(interaction: discord.Interaction, action: str, user: Optional[discord.Member] = None):
+            # インスタンスメソッドを呼び出す
+            await self._whitelist_command(interaction, action, user)
         
     async def setup_hook(self):
         # スラッシュコマンドを登録
