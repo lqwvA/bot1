@@ -105,12 +105,19 @@ class AntiSpamBot(discord.Client):
             logger.error(f'スラッシュコマンドの同期に失敗: {type(e).__name__}: {e}', exc_info=True)
             raise
 
-    # コマンドをクラスメソッドとして定義
-    @staticmethod
-    async def _whitelist_command(interaction: discord.Interaction, action: str, user: Optional[discord.Member] = None):
-        """ホワイトリストを管理するコマンド"""
-        # インスタンスを取得
-        bot = interaction.client
+    async def _whitelist_command(self, interaction: discord.Interaction, action: str, user: Optional[discord.Member] = None) -> None:
+        """
+        ホワイトリストを管理するコマンド
+        
+        Parameters
+        ----------
+        interaction : discord.Interaction
+            インタラクションオブジェクト
+        action : str
+            実行するアクション (add/remove/list)
+        user : Optional[discord.Member], optional
+            追加・削除するユーザー (listの場合は不要), by default None
+        """
         try:
             action = action.lower()
             
@@ -164,12 +171,15 @@ class AntiSpamBot(discord.Client):
                 )
                 
         except Exception as e:
-            logger.error(f'ホワイトリストコマンドでエラー: {e}')
+            logger.error(f'ホワイトリストコマンドでエラー: {e}', exc_info=True)
             if not interaction.response.is_done():
-                await interaction.response.send_message(
-                    '❌ コマンドの実行中にエラーが発生しました',
-                    ephemeral=True
-                )
+                try:
+                    await interaction.response.send_message(
+                        '❌ コマンドの実行中にエラーが発生しました',
+                        ephemeral=True
+                    )
+                except Exception as send_error:
+                    logger.error(f'エラーメッセージの送信に失敗: {send_error}')
 
     async def on_command_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
         """スラッシュコマンドのエラーハンドラー"""
