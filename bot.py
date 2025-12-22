@@ -30,7 +30,6 @@ class AntiSpamBot(commands.Bot):
         intents.message_content = True
         
         super().__init__(
-            command_prefix=None,  # スラッシュコマンドのみを使用するため不要
             intents=intents
         )
         
