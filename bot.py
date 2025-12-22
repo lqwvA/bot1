@@ -3,7 +3,7 @@ import os
 import re
 import json
 import logging
-from typing import Dict, List, Set, Optional
+from typing import Dict, List, Set, Optional, Union
 from collections import defaultdict, deque
 from discord.ext import commands
 from discord import app_commands
@@ -21,7 +21,7 @@ CONFIG_FILE = 'bot_config.json'
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
 
-class AntiSpamBot(commands.Bot):
+class AntiSpamBot(discord.Client):
     def __init__(self):
         intents = discord.Intents.default()
         intents.messages = True
@@ -29,9 +29,8 @@ class AntiSpamBot(commands.Bot):
         intents.members = True
         intents.message_content = True
         
-        super().__init__(
-            intents=intents
-        )
+        super().__init__(intents=intents)
+        self.tree = app_commands.CommandTree(self)
         
         # 設定の読み込み
         self.config = self.load_config()
@@ -69,6 +68,7 @@ class AntiSpamBot(commands.Bot):
             logger.info(f'同期したスラッシュコマンド: {len(synced)}個')
         except Exception as e:
             logger.error(f'スラッシュコマンドの同期に失敗: {e}')
+            raise
 
     @app_commands.command(name="whitelist", description="ホワイトリストを管理します")
     @app_commands.describe(
@@ -205,7 +205,11 @@ class AntiSpamBot(commands.Bot):
 
     async def on_ready(self):
         logger.info(f'{self.user} がログインしました。')
-        await self.setup_hook()
+        try:
+            await self.setup_hook()
+        except Exception as e:
+            logger.error(f'起動中にエラーが発生しました: {e}')
+            await self.close()
 
     def check_message_content(self, message: discord.Message) -> List[str]:
         """メッセージの内容をチェックして、問題があれば理由を返す"""
