@@ -9,13 +9,14 @@ load_dotenv()
 
 # ボットの設定
 TOKEN = os.getenv('DISCORD_TOKEN')
-ROLE_NAME = "浮上"  # 付与するロール名を「浮上」に変更
+ROLE_NAME = "浮上"  # 付与するロール名
 
-# インテンスの設定
+# インテントの設定
 intents = discord.Intents.default()
 intents.messages = True
 intents.guilds = True
 intents.members = True
+intents.message_content = True  # メッセージの内容を取得するために必要
 
 # ボットを初期化
 bot = commands.Bot(command_prefix='!', intents=intents)
@@ -23,7 +24,6 @@ bot = commands.Bot(command_prefix='!', intents=intents)
 @bot.event
 async def on_ready():
     print(f'{bot.user.name} がログインしました！')
-    await bot.change_presence(activity=discord.Game(name=f"「🔓」で{ROLE_NAME}ロールを取得"))
 
 @bot.event
 async def on_message(message):
@@ -32,7 +32,7 @@ async def on_message(message):
         return
 
     # 「🔓」というメッセージに反応
-    if message.content == '🔓':
+    if '🔓' in message.content:
         # ロールを取得（存在しなければ作成）
         role = get(message.guild.roles, name=ROLE_NAME)
         if not role:
