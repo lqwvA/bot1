@@ -1,17 +1,12 @@
-name: Run Discord Bot
+name: Discord Bot
 
 on:
-  push:
-    branches: [ main ]
-  workflow_dispatch:
-  # 6時間ごとに再起動
   schedule:
     - cron: '0 */6 * * *'
 
 jobs:
-  run-bot:
+  bot:
     runs-on: ubuntu-latest
-    
     steps:
     - uses: actions/checkout@v3
     
@@ -24,8 +19,23 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
+        sudo apt-get update
+        sudo apt-get install -y screen
     
     - name: Run bot
       env:
         DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
-      run: python bot.py
+      run: |
+        # 既存のセッションを終了
+        screen -S discord-bot -X quit 2>/dev/null || true
+        
+        # 新しいセッションでボットを起動
+        screen -dmS discord-bot bash -c 'while true; do python bot.py; echo "Bot crashed with exit code $?. Restarting in 5 seconds..." >&2; sleep 5; done'
+        
+        # ログを表示
+        sleep 10
+        screen -ls
+        
+        # 5時間50分間実行
+        sleep 21000
+        screen -S discord-bot -X quit
