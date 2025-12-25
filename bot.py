@@ -6,11 +6,9 @@ from dotenv import load_dotenv
 # .envファイルから環境変数を読み込む
 load_dotenv()
 
-# 環境変数からトークンを取得
+# 環境変数からトークンとチャンネルIDを取得
 TOKEN = os.getenv('DISCORD_TOKEN')
-
-# 許可するチャンネル名のリスト
-ALLOWED_CHANNEL_NAMES = ["浮上向け"]  # 必要に応じて変更
+ALLOWED_CHANNEL_IDS = [int(id_str) for id_str in os.getenv('ALLOWED_CHANNEL_IDS', '').split(',') if id_str]
 
 # ロール名
 ROLE_NAME = "浮上"
@@ -28,6 +26,7 @@ bot = commands.Bot(command_prefix='!', intents=intents)
 @bot.event
 async def on_ready():
     print(f'{bot.user.name} がログインしました！')
+    print(f'許可されたチャンネルID: {ALLOWED_CHANNEL_IDS}')
     # 処理中フラグを初期化
     bot.processing = False
 
@@ -41,8 +40,8 @@ async def on_message(message):
     if not isinstance(message.channel, discord.TextChannel):
         return
 
-    # 許可されたチャンネル名でない場合は無視
-    if message.channel.name not in ALLOWED_CHANNEL_NAMES:
+    # 許可されたチャンネルIDでない場合は無視
+    if message.channel.id not in ALLOWED_CHANNEL_IDS:
         return
 
     # メッセージが空、または🔓を含まない場合は無視
@@ -111,5 +110,9 @@ async def on_message(message):
 
 # Botを起動
 if __name__ == "__main__":
-
-    bot.run(TOKEN)
+    if not TOKEN:
+        print("エラー: .envファイルにDISCORD_TOKENを設定してください")
+    elif not ALLOWED_CHANNEL_IDS:
+        print("エラー: .envファイルにALLOWED_CHANNEL_IDSを設定してください")
+    else:
+        bot.run(TOKEN)
