@@ -6,9 +6,11 @@ from dotenv import load_dotenv
 # .envファイルから環境変数を読み込む
 load_dotenv()
 
-# 環境変数からトークンとチャンネルIDを取得
+# 環境変数からトークンを取得
 TOKEN = os.getenv('DISCORD_TOKEN')
-ALLOWED_CHANNEL_ID = int(os.getenv('ALLOWED_CHANNEL_ID', 0))  # デフォルトは0（無効）
+
+# 許可するチャンネル名のリスト
+ALLOWED_CHANNEL_NAMES = ["浮上", "浮上チャンネル", "浮上用"]  # 必要に応じて変更
 
 # ロール名
 ROLE_NAME = "浮上"
@@ -35,8 +37,12 @@ async def on_message(message):
     if message.author == bot.user:
         return
 
-    # 許可されたチャンネル以外では無視
-    if message.channel.id != ALLOWED_CHANNEL_ID:
+    # テキストチャンネル以外では無視
+    if not isinstance(message.channel, discord.TextChannel):
+        return
+
+    # 許可されたチャンネル名でない場合は無視
+    if message.channel.name not in ALLOWED_CHANNEL_NAMES:
         return
 
     # メッセージが空、または🔓を含まない場合は無視
