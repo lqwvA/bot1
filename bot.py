@@ -10,7 +10,7 @@ load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
 
 # 許可するチャンネル名のリスト
-ALLOWED_CHANNEL_NAMES = ["浮上", "浮上チャンネル", "浮上用"]  # 必要に応じて変更
+ALLOWED_CHANNEL_NAMES = ["浮上向け"]  # 必要に応じて変更
 
 # ロール名
 ROLE_NAME = "浮上"
@@ -111,4 +111,5 @@ async def on_message(message):
 
 # Botを起動
 if __name__ == "__main__":
+
     bot.run(TOKEN)
