@@ -4,9 +4,8 @@ on:
   push:
     branches: [ main ]
   workflow_dispatch:
-  # 6時間ごとに再起動
   schedule:
-    - cron: '0 */6 * * *'
+    - cron: '0 */6 * * *'  # 6時間ごとに実行
 
 jobs:
   run-bot:
@@ -28,4 +27,5 @@ jobs:
     - name: Run bot
       env:
         DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
+        ALLOWED_CHANNEL_IDS: ${{ secrets.ALLOWED_CHANNEL_IDS }}
       run: python bot.py
