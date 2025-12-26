@@ -2,6 +2,9 @@ import os
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv
+import asyncio
+import signal
+import sys
 
 # .envファイルから環境変数を読み込む
 load_dotenv()
@@ -23,15 +26,37 @@ intents.message_content = True
 # ボットを初期化
 bot = commands.Bot(command_prefix='!', intents=intents)
 
+# グローバル変数で処理中フラグを管理
+processing = False
+bot_instance = None
+
 @bot.event
 async def on_ready():
+    global bot_instance
     print(f'{bot.user.name} がログインしました！')
     print(f'許可されたチャンネルID: {ALLOWED_CHANNEL_IDS}')
-    # 処理中フラグを初期化
-    bot.processing = False
+    bot_instance = bot
+    # シグナルハンドラを設定
+    signal.signal(signal.SIGINT, handle_shutdown)
+    signal.signal(signal.SIGTERM, handle_shutdown)
+
+def handle_shutdown(signum, frame):
+    """シグナルを受信したときの処理"""
+    print(f"\nシグナル {signum} を受信しました。終了処理を実行します...")
+    if bot_instance:
+        asyncio.create_task(close_bot())
+    else:
+        sys.exit(0)
+
+async def close_bot():
+    """ボットを安全に終了する"""
+    print("ボットを終了しています...")
+    await bot.close()
 
 @bot.event
 async def on_message(message):
+    global processing
+    
     # ボット自身のメッセージは無視
     if message.author == bot.user:
         return
@@ -50,12 +75,12 @@ async def on_message(message):
         return
 
     # 既に処理中の場合は無視
-    if hasattr(bot, 'processing') and bot.processing:
+    if processing:
         return
 
     try:
         # 処理中フラグを立てる
-        bot.processing = True
+        processing = True
 
         # ロールを取得または作成
         role = discord.utils.get(message.guild.roles, name=ROLE_NAME)
@@ -97,7 +122,7 @@ async def on_message(message):
         )
     finally:
         # 処理中フラグを下ろす
-        bot.processing = False
+        processing = False
 
     # ユーザーのメッセージを削除
     try:
@@ -108,11 +133,31 @@ async def on_message(message):
     # コマンド処理を続行
     await bot.process_commands(message)
 
-# Botを起動
-if __name__ == "__main__":
+@bot.event
+async def on_error(event, *args, **kwargs):
+    """イベントループでエラーが発生したときの処理"""
+    print(f"エラーが発生しました: {event}")
+    import traceback
+    traceback.print_exc()
+
+# メイン処理
+def main():
     if not TOKEN:
         print("エラー: .envファイルにDISCORD_TOKENを設定してください")
-    elif not ALLOWED_CHANNEL_IDS:
+        return
+    if not ALLOWED_CHANNEL_IDS:
         print("エラー: .envファイルにALLOWED_CHANNEL_IDSを設定してください")
-    else:
+        return
+
+    try:
         bot.run(TOKEN)
+    except KeyboardInterrupt:
+        print("\nボットを終了します...")
+    except Exception as e:
+        print(f"致命的なエラーが発生しました: {e}")
+    finally:
+        # クリーンアップ処理
+        print("クリーンアップを実行します...")
+
+if __name__ == "__main__":
+    main()
