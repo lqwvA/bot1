@@ -1,4 +1,4 @@
-name: Run Discord Bot
+name: Discord Bot
 
 on:
   push:
@@ -10,6 +10,11 @@ on:
 jobs:
   run-bot:
     runs-on: ubuntu-latest
+    
+    # 同じコミットに対して同時に複数のワークフローが実行されないようにする
+    concurrency: 
+      group: bot-${{ github.ref }}
+      cancel-in-progress: true
     
     steps:
     - uses: actions/checkout@v3
@@ -23,9 +28,51 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
+        pip install psutil
+    
+    - name: Kill existing bot processes
+      run: |
+        # 既存のPythonプロセスを終了
+        pkill -f "python.*bot.py" || true
+        # プロセスが終了するまで少し待つ
+        sleep 3
     
     - name: Run bot
       env:
         DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
         ALLOWED_CHANNEL_IDS: ${{ secrets.ALLOWED_CHANNEL_IDS }}
-      run: python bot.py
+      run: |
+        # バックグラウンドでボットを実行
+        nohup python bot.py > bot.log 2>&1 &
+        # プロセスIDを保存
+        echo $! > bot.pid
+        # 起動を待つ
+        sleep 10
+        # ログを表示
+        cat bot.log
+        # プロセスが実行中か確認
+        if ! ps -p $(cat bot.pid) > /dev/null; then
+          echo "ボットの起動に失敗しました"
+          cat bot.log
+          exit 1
+        fi
+        echo "ボットが正常に起動しました"
+    
+    - name: Wait for 5 hours and 50 minutes
+      run: |
+        # 5時間50分待機（6時間の制限前に終了）
+        sleep 21000
+    
+    - name: Stop bot
+      if: always()
+      run: |
+        # ボットを停止
+        if [ -f bot.pid ]; then
+          kill $(cat bot.pid) 2>/dev/null || true
+          rm -f bot.pid
+        fi
+        # ログを表示
+        if [ -f bot.log ]; then
+          echo "=== 最終ログ ==="
+          tail -n 50 bot.log
+        fi
