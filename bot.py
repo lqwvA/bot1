@@ -5,8 +5,6 @@ from dotenv import load_dotenv
 import asyncio
 import signal
 import sys
-import datetime
-import time
 
 # .envファイルから環境変数を読み込む
 load_dotenv()
@@ -29,69 +27,24 @@ intents.message_content = True
 bot = commands.Bot(command_prefix='!', intents=intents)
 
 # グローバル変数
-bot_instance = None
 processing = False
-last_activity = time.time()
 
 @bot.event
 async def on_ready():
-    global bot_instance
-    bot_instance = bot
     print(f'{bot.user.name} がログインしました！')
-    print(f'起動時刻: {datetime.datetime.now()}')
-    print(f'許可されたチャンネルID: {ALLOWED_CHANNEL_IDS}')
-    
-    # 定期的なステータス更新を開始
-    update_status.start()
-    
-    # シグナルハンドラを設定
-    signal.signal(signal.SIGINT, handle_shutdown)
-    signal.signal(signal.SIGTERM, handle_shutdown)
+    # 10分ごとに再起動するタスクを開始
+    restart_task.start()
 
-@tasks.loop(minutes=1)
-async def update_status():
-    """ボットのステータスを定期的に更新"""
-    global last_activity
-    
-    # 最後のアクティビティから10分以上経過していたら再起動
-    if time.time() - last_activity > 600:  # 10分
-        print("10分間アクティビティがありません。再起動します。")
-        await restart_bot()
-        return
-
-@update_status.before_loop
-async def before_update_status():
-    """タスク開始前にボットが準備完了するまで待機"""
-    await bot.wait_until_ready()
-
-def handle_shutdown(signum, frame):
-    """シグナルを受信したときの処理"""
-    print(f"\nシグナル {signum} を受信しました。終了処理を実行します...")
-    if bot_instance:
-        asyncio.create_task(close_bot())
-    else:
-        sys.exit(0)
-
-async def close_bot():
-    """ボットを安全に終了する"""
-    print("ボットを終了しています...")
-    update_status.cancel()
+@tasks.loop(minutes=10)
+async def restart_task():
+    """10分ごとに再起動"""
+    print("10分経過したため再起動します。")
     await bot.close()
-
-async def restart_bot():
-    """ボットを再起動する"""
-    print("ボットを再起動します...")
-    update_status.cancel()
-    await bot.close()
-    # 終了コード1で終了（GitHub Actionsが再起動）
-    sys.exit(1)
+    sys.exit(0)
 
 @bot.event
 async def on_message(message):
-    global processing, last_activity
-    
-    # アクティビティを更新
-    last_activity = time.time()
+    global processing
     
     # ボット自身のメッセージは無視
     if message.author == bot.user:
@@ -171,12 +124,13 @@ async def on_message(message):
 
 @bot.event
 async def on_error(event, *args, **kwargs):
-    """イベントループでエラーが発生したときの処理"""
+    """エラー発生時の処理"""
     print(f"エラーが発生しました: {event}")
     import traceback
     traceback.print_exc()
-    # エラーが発生したら再起動を試みる
-    await restart_bot()
+    # エラーが発生したら再起動
+    await bot.close()
+    sys.exit(1)
 
 # メイン処理
 def main():
@@ -193,11 +147,7 @@ def main():
         print("\nボットを終了します...")
     except Exception as e:
         print(f"致命的なエラーが発生しました: {e}")
-        # エラーが発生したら終了コード1で終了（GitHub Actionsが再起動）
         sys.exit(1)
-    finally:
-        # クリーンアップ処理
-        print("クリーンアップを実行します...")
 
 if __name__ == "__main__":
     main()
