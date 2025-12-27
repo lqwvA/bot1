@@ -58,9 +58,6 @@ async def update_status():
         print("10分間アクティビティがありません。再起動します。")
         await restart_bot()
         return
-    
-    # ステータスを更新
-    await bot.change_presence(activity=discord.Game(name=f"起動中 | {datetime.datetime.now().strftime('%H:%M')}"))
 
 @update_status.before_loop
 async def before_update_status():
