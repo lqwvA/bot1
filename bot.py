@@ -4,7 +4,6 @@ from discord.ext import commands, tasks
 from dotenv import load_dotenv
 import asyncio
 import signal
-import sys
 
 # .envファイルから環境変数を読み込む
 load_dotenv()
