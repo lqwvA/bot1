@@ -31,12 +31,17 @@ processing = False
 @bot.event
 async def on_ready():
     print(f'{bot.user.name} がログインしました！')
-    # 10分ごとに再起動するタスクを開始
-    restart_task.start()
+    # ボットが完全に準備できてからタスクを開始
+    await asyncio.sleep(5)  # 5秒待機
+    if not restart_task.is_running():
+        restart_task.start()
 
-@tasks.loop(minutes=10)
+@tasks.loop(minutes=10, count=1)
 async def restart_task():
     """10分ごとに再起動"""
+    if restart_task.current_loop == 0:
+        # 初回実行時はスキップ
+        return
     print("10分経過したため再起動します。")
     await bot.close()
     # 終了コード1で終了（GitHub Actionsが再起動）
