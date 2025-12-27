@@ -40,7 +40,8 @@ async def restart_task():
     """10分ごとに再起動"""
     print("10分経過したため再起動します。")
     await bot.close()
-    sys.exit(0)
+    # 終了コード1で終了（GitHub Actionsが再起動）
+    os._exit(1)
 
 @bot.event
 async def on_message(message):
@@ -130,7 +131,7 @@ async def on_error(event, *args, **kwargs):
     traceback.print_exc()
     # エラーが発生したら再起動
     await bot.close()
-    sys.exit(1)
+    os._exit(1)
 
 # メイン処理
 def main():
@@ -147,7 +148,7 @@ def main():
         print("\nボットを終了します...")
     except Exception as e:
         print(f"致命的なエラーが発生しました: {e}")
-        sys.exit(1)
+        os._exit(1)
 
 if __name__ == "__main__":
     main()
